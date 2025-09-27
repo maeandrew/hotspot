@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>План будинку</title>
+  <style>
+    :root { --accent: #1976d2; --bg: #f5f7fa; --text: #1f2937; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: var(--text); background: var(--bg); }
+    header { padding: 12px 16px; background: white; border-bottom: 1px solid #e5e7eb; position: sticky; top: 0; z-index: 5; }
+    .container { max-width: 1100px; margin: 16px auto; padding: 0 16px; }
+    .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    select, button { padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; }
+    button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .message { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; }
+
+    .plan-wrap { position: relative; width: 100%; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden; }
+    .plan-inner { position: relative; width: 100%; }
+    .plan-inner img { width: 100%; height: auto; display: block; }
+    .hotspot { position: absolute; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.25); transform: translate(-50%, -50%); cursor: pointer; }
+    .legend { padding: 8px 12px; font-size: 13px; color: #475569; }
+
+    /* Modal */
+    .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; padding: 10px; z-index: 20; }
+    .modal.open { display: flex; }
+    .modal-content { background: #0b0f15; color: white; width: calc(100vw - 20px); max-width: none; height: calc(100vh - 20px); border-radius: 10px; overflow: hidden; display: grid; grid-template-rows: auto 1fr auto; }
+    .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: #111827; }
+    .modal-body { background: #0b0f15; position: relative; overflow: hidden; height: auto; min-height: 0; }
+    .modal-body img { position: absolute; top: 0; left: 0; width: auto; height: auto; max-width: none; max-height: none; display: block; transform-origin: 0 0; user-select: none; -webkit-user-drag: none; }
+    .modal-footer { display: flex; justify-content: space-between; padding: 8px 12px; background: #111827; }
+    .modal button { background: #1f2937; color: #fff; border: 1px solid #374151; }
+
+    .zoom-controls { display: flex; gap: 8px; align-items: center; }
+    .icon-btn { width: 36px; height: 32px; display: inline-flex; align-items: center; justify-content: center; font-size: 18px; }
+    .hint { font-size: 12px; color: #94a3b8; margin-left: 8px; }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+<header>
+  <div class="container toolbar">
+    <strong>Інтерактивний план будинку</strong>
+    <span style="flex:1"></span>
+    <label for="planSelect">План:</label>
+    <select id="planSelect"></select>
+  </div>
+</header>
+<div class="container">
+  <div id="status" class="message hidden"></div>
+  <div class="plan-wrap hidden" id="planWrap">
+    <div class="plan-inner">
+      <img id="planImg" alt="План" />
+      <div id="hotspots"></div>
+    </div>
+    <div class="legend" id="legend"></div>
+  </div>
+</div>
+
+<!-- Modal Gallery -->
+<div class="modal" id="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <div id="modalTitle">Фото</div>
+      <div class="zoom-controls">
+        <button id="zoomOutBtn" class="icon-btn" title="Зменшити">−</button>
+        <button id="zoomInBtn" class="icon-btn" title="Збільшити">+</button>
+        <span class="hint" id="zoomHint">Подвійний клік або щипок для зуму</span>
+        <button id="closeBtn">Закрити</button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <img id="modalImg" src="" alt="" />
+    </div>
+    <div class="modal-footer">
+      <button id="prevBtn">Попереднє</button>
+      <div id="counter"></div>
+      <button id="nextBtn">Наступне</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const planSelect = document.getElementById('planSelect');
+  const statusEl = document.getElementById('status');
+  const planWrap = document.getElementById('planWrap');
+  const planImg = document.getElementById('planImg');
+  const hotspotsEl = document.getElementById('hotspots');
+  const legendEl = document.getElementById('legend');
+
+  const modal = document.getElementById('modal');
+  const modalImg = document.getElementById('modalImg');
+  const modalTitle = document.getElementById('modalTitle');
+  const counter = document.getElementById('counter');
+  const btnClose = document.getElementById('closeBtn');
+  const btnPrev = document.getElementById('prevBtn');
+  const btnNext = document.getElementById('nextBtn');
+  const btnZoomIn = document.getElementById('zoomInBtn');
+  const btnZoomOut = document.getElementById('zoomOutBtn');
+  const modalBody = document.querySelector('.modal-body');
+
+  let allPoints = [];
+  let natural = {w: 0, h: 0};
+  let gallery = { files: [], idx: 0, room: '', plan: '' };
+
+  function showMessage(text){
+    statusEl.textContent = text;
+    statusEl.classList.remove('hidden');
+    planWrap.classList.add('hidden');
+  }
+  function hideMessage(){
+    statusEl.classList.add('hidden');
+  }
+
+  async function api(url){
+    const res = await fetch(url, {cache:'no-cache'});
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    return await res.json();
+  }
+
+  async function loadPlans(){
+    try{
+      const plans = await api('ajax.php?action=PLANS');
+      planSelect.innerHTML = '';
+      if(!plans || plans.length === 0){
+        planSelect.classList.add('hidden');
+        showMessage('Плани ще не додані');
+        return;
+      }
+      hideMessage();
+      planSelect.classList.remove('hidden');
+      for(const p of plans){
+        const opt = document.createElement('option');
+        opt.value = p; opt.textContent = p; planSelect.appendChild(opt);
+      }
+      const urlPlan = new URL(location.href).searchParams.get('plan');
+      if(urlPlan && plans.includes(urlPlan)) planSelect.value = urlPlan;
+      await onPlanChange();
+    }catch(e){
+      console.error(e);
+      showMessage('Помилка завантаження планів');
+    }
+  }
+
+  async function loadPoints(){
+    try{
+      const pts = await api('ajax.php');
+      allPoints = Array.isArray(pts) ? pts : [];
+    }catch(e){ allPoints = []; }
+  }
+
+  function clearHotspots(){ hotspotsEl.innerHTML = ''; }
+
+  function renderHotspots(plan){
+    clearHotspots();
+    const pts = allPoints.filter(p => p.plan === plan);
+    if(pts.length === 0){ legendEl.textContent = 'Для цього плану точки відсутні.'; return; }
+    legendEl.textContent = `Точок: ${pts.length}`;
+
+    for(const p of pts){
+      const dot = document.createElement('div');
+      dot.className = 'hotspot';
+      const leftPct = (parseFloat(p.x) / natural.w) * 100;
+      const topPct = (parseFloat(p.y) / natural.h) * 100;
+      dot.style.left = leftPct + '%';
+      dot.style.top = topPct + '%';
+      dot.title = `${p.room}`;
+      dot.addEventListener('click', () => openGallery(p));
+      hotspotsEl.appendChild(dot);
+    }
+  }
+
+  async function onPlanChange(){
+    const plan = planSelect.value;
+    if(!plan){ showMessage('Оберіть план'); return; }
+    hideMessage();
+
+    try{
+      const files = await api('ajax.php?action=PLAN_FILES&plan=' + encodeURIComponent(plan));
+      if(!files || files.length === 0){
+        showMessage('Для плану не знайдено фонового зображення');
+        return;
+      }
+      const bg = files.find(f => /plan\.(jpg|jpeg|png|webp)$/i.test(f)) || files[0];
+      planImg.src = bg;
+      await new Promise(res => { planImg.onload = res; planImg.onerror = res; });
+      natural.w = planImg.naturalWidth || planImg.clientWidth;
+      natural.h = planImg.naturalHeight || planImg.clientHeight;
+      planWrap.classList.remove('hidden');
+
+      await loadPoints();
+      renderHotspots(plan);
+    }catch(e){
+      console.error(e);
+      showMessage('Не вдалося завантажити дані плану');
+    }
+  }
+
+  async function openGallery(point){
+    try{
+      const files = await api('ajax.php?action=LIST&plan=' + encodeURIComponent(point.plan) + '&room=' + encodeURIComponent(point.room));
+      gallery = { files, plan: point.plan, room: point.room, idx: Math.max(0, files.indexOf(point.photo)) };
+      updateModal();
+      modal.classList.add('open');
+    }catch(e){ console.error(e); }
+  }
+
+  function updateModal(){
+    if(!gallery.files || gallery.files.length === 0){ modalImg.src=''; counter.textContent=''; return; }
+    if(gallery.idx < 0) gallery.idx = 0;
+    if(gallery.idx >= gallery.files.length) gallery.idx = gallery.files.length-1;
+    const src = gallery.files[gallery.idx];
+    modalImg.src = src;
+    modalTitle.textContent = `${gallery.plan} / ${gallery.room}`;
+    counter.textContent = `${gallery.idx+1} / ${gallery.files.length}`;
+    // reset zoom after image source change (wait for load)
+    modalImg.onload = () => initZoom();
+  }
+
+  btnClose.addEventListener('click', ()=> modal.classList.remove('open'));
+  btnPrev.addEventListener('click', ()=>{ gallery.idx--; updateModal(); });
+  btnNext.addEventListener('click', ()=>{ gallery.idx++; updateModal(); });
+  modal.addEventListener('click', (e)=>{ if(e.target === modal) modal.classList.remove('open'); });
+
+  // Zoom & Pan logic for modal image
+  const Z = { scale: 1, min: 1, max: 5, x: 0, y: 0, baseW: 0, baseH: 0, vw: 0, vh: 0,
+              dragging: false, startX: 0, startY: 0, startTX: 0, startTY: 0,
+              pinchDist: 0, pinchStartScale: 1, pinchCenter: {x:0,y:0} };
+
+  function initZoom(){
+    const rect = modalBody.getBoundingClientRect();
+    Z.vw = rect.width; Z.vh = rect.height;
+    const nw = modalImg.naturalWidth || modalImg.width; // natural size
+    const nh = modalImg.naturalHeight || modalImg.height;
+    const ratio = Math.min(Z.vw / nw, Z.vh / nh);
+    Z.baseW = Math.max(1, Math.round(nw * ratio));
+    Z.baseH = Math.max(1, Math.round(nh * ratio));
+    modalImg.style.width = Z.baseW + 'px';
+    modalImg.style.height = Z.baseH + 'px';
+    Z.scale = 1; centerImage(); applyTransform();
+  }
+  function centerImage(){
+    Z.x = (Z.vw - Z.baseW) / 2;
+    Z.y = (Z.vh - Z.baseH) / 2;
+  }
+  function applyTransform(){
+    const sw = Z.baseW * Z.scale;
+    const sh = Z.baseH * Z.scale;
+    // Determine allowed ranges per axis: center if image smaller than viewport
+    let minX, maxX, minY, maxY;
+    if (sw <= Z.vw) { minX = maxX = (Z.vw - sw) / 2; } else { minX = Z.vw - sw; maxX = 0; }
+    if (sh <= Z.vh) { minY = maxY = (Z.vh - sh) / 2; } else { minY = Z.vh - sh; maxY = 0; }
+    // clamp so image stays within viewport (or centered if smaller)
+    Z.x = Math.max(minX, Math.min(Z.x, maxX));
+    Z.y = Math.max(minY, Math.min(Z.y, maxY));
+    modalImg.style.transform = `translate(${Z.x}px, ${Z.y}px) scale(${Z.scale})`;
+    const canPanX = sw > Z.vw, canPanY = sh > Z.vh;
+    modalImg.style.cursor = (Z.scale > 1 && (canPanX || canPanY)) ? (Z.dragging ? 'grabbing' : 'grab') : 'default';
+  }
+  function setScaleAt(cx, cy, newScale){
+    const s = Math.max(Z.min, Math.min(Z.max, newScale));
+    const prev = Z.scale;
+    if(s === prev){ applyTransform(); return; }
+    // point under cursor before scaling in image coords
+    const imgX = (cx - Z.x) / prev;
+    const imgY = (cy - Z.y) / prev;
+    Z.scale = s;
+    // keep the same point under the cursor after scaling
+    Z.x = cx - imgX * Z.scale;
+    Z.y = cy - imgY * Z.scale;
+    applyTransform();
+  }
+
+  // Buttons
+  btnZoomIn.addEventListener('click', ()=>{
+    const cx = Z.vw/2, cy = Z.vh/2;
+    setScaleAt(cx, cy, Z.scale + 0.25);
+  });
+  btnZoomOut.addEventListener('click', ()=>{
+    const cx = Z.vw/2, cy = Z.vh/2;
+    if(Z.scale - 0.25 <= 1){ Z.scale = 1; centerImage(); }
+    else setScaleAt(cx, cy, Z.scale - 0.25);
+    applyTransform();
+  });
+
+  // Double click to toggle zoom
+  modalBody.addEventListener('dblclick', (e)=>{
+    const rect = modalBody.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
+    if(Z.scale < 2) setScaleAt(cx, cy, Math.min(2, Z.max));
+    else { Z.scale = 1; centerImage(); applyTransform(); }
+  });
+
+  // Mouse drag pan
+  modalBody.addEventListener('mousedown', (e)=>{
+    if(e.button !== 0) return;
+    if(Z.scale <= 1) return;
+    Z.dragging = true;
+    Z.startX = e.clientX; Z.startY = e.clientY;
+    Z.startTX = Z.x; Z.startTY = Z.y;
+    applyTransform();
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', (e)=>{
+    if(!Z.dragging) return;
+    const dx = e.clientX - Z.startX;
+    const dy = e.clientY - Z.startY;
+    Z.x = Z.startTX + dx;
+    Z.y = Z.startTY + dy;
+    applyTransform();
+  });
+  window.addEventListener('mouseup', ()=>{ if(Z.dragging){ Z.dragging=false; applyTransform(); } });
+
+  // Wheel zoom (desktop convenience)
+  modalBody.addEventListener('wheel', (e)=>{
+    e.preventDefault();
+    const rect = modalBody.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
+    const delta = e.deltaY > 0 ? -0.2 : 0.2;
+    const target = Z.scale + delta;
+    if(target <= 1){ Z.scale = 1; centerImage(); applyTransform(); }
+    else setScaleAt(cx, cy, target);
+  }, { passive: false });
+
+  // Touch gestures: pan and pinch zoom
+  modalBody.addEventListener('touchstart', (e)=>{
+    if(e.touches.length === 2){
+      e.preventDefault();
+      const [t1, t2] = [e.touches[0], e.touches[1]];
+      Z.pinchDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      const rect = modalBody.getBoundingClientRect();
+      Z.pinchCenter = { x: ((t1.clientX + t2.clientX)/2) - rect.left,
+                        y: ((t1.clientY + t2.clientY)/2) - rect.top };
+      Z.pinchStartScale = Z.scale;
+    } else if(e.touches.length === 1){
+      if(Z.scale <= 1) return; // no pan if not zoomed
+      const t = e.touches[0];
+      Z.dragging = true;
+      Z.startX = t.clientX; Z.startY = t.clientY;
+      Z.startTX = Z.x; Z.startTY = Z.y;
+    }
+  }, { passive: false });
+
+  modalBody.addEventListener('touchmove', (e)=>{
+    if(e.touches.length === 2){
+      e.preventDefault();
+      const [t1, t2] = [e.touches[0], e.touches[1]];
+      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      const scale = Z.pinchStartScale * (dist / (Z.pinchDist || 1));
+      setScaleAt(Z.pinchCenter.x, Z.pinchCenter.y, scale);
+    } else if(e.touches.length === 1 && Z.dragging){
+      e.preventDefault();
+      const t = e.touches[0];
+      const dx = t.clientX - Z.startX;
+      const dy = t.clientY - Z.startY;
+      Z.x = Z.startTX + dx;
+      Z.y = Z.startTY + dy;
+      applyTransform();
+    }
+  }, { passive: false });
+
+  modalBody.addEventListener('touchend', ()=>{ Z.dragging = false; });
+  modalBody.addEventListener('touchcancel', ()=>{ Z.dragging = false; });
+
+  // Recenter on window resize while modal open
+  window.addEventListener('resize', ()=>{ if(modal.classList.contains('open')) initZoom(); });
+
+  planSelect.addEventListener('change', onPlanChange);
+  loadPlans();
+})();
+</script>
+</body>
+</html>

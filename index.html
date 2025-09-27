@@ -16,10 +16,14 @@
     .message { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; }
 
     .plan-wrap { position: relative; width: 100%; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden; }
-    .plan-inner { position: relative; width: 100%; }
+    .plan-inner { position: relative; width: 100%; touch-action: none; overflow: hidden; transform-origin: 0 0; }
     .plan-inner img { width: 100%; height: auto; display: block; }
     .hotspot { position: absolute; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.25); transform: translate(-50%, -50%); cursor: pointer; }
     .legend { padding: 8px 12px; font-size: 13px; color: #475569; }
+
+    /* Plan zoom overlay controls */
+    .plan-zoom-controls { position: absolute; right: 10px; bottom: 10px; z-index: 5; display: flex; gap: 6px; }
+    .plan-zoom-btn { width: 36px; height: 36px; border-radius: 6px; background: rgba(17,24,39,0.8); color: #fff; border: 1px solid #374151; display: inline-flex; align-items: center; justify-content: center; font-size: 18px; }
 
     /* Modal */
     .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; padding: 10px; z-index: 20; }
@@ -41,7 +45,7 @@
 <body>
 <header>
   <div class="container toolbar">
-    <strong>Інтерактивний план будинку</strong>
+    <strong>Будинок</strong>
     <span style="flex:1"></span>
     <label for="planSelect">План:</label>
     <select id="planSelect"></select>
@@ -50,9 +54,13 @@
 <div class="container">
   <div id="status" class="message hidden"></div>
   <div class="plan-wrap hidden" id="planWrap">
-    <div class="plan-inner">
+    <div class="plan-inner" id="planInner">
       <img id="planImg" alt="План" />
       <div id="hotspots"></div>
+      <div class="plan-zoom-controls">
+        <button id="planZoomOut" class="plan-zoom-btn" title="Зменшити">−</button>
+        <button id="planZoomIn" class="plan-zoom-btn" title="Збільшити">+</button>
+      </div>
     </div>
     <div class="legend" id="legend"></div>
   </div>
@@ -86,9 +94,12 @@
   const planSelect = document.getElementById('planSelect');
   const statusEl = document.getElementById('status');
   const planWrap = document.getElementById('planWrap');
+  const planInner = document.getElementById('planInner');
   const planImg = document.getElementById('planImg');
   const hotspotsEl = document.getElementById('hotspots');
   const legendEl = document.getElementById('legend');
+  const planZoomInBtn = document.getElementById('planZoomIn');
+  const planZoomOutBtn = document.getElementById('planZoomOut');
 
   const modal = document.getElementById('modal');
   const modalImg = document.getElementById('modalImg');
@@ -179,6 +190,53 @@
     }
   }
 
+  // Plan zoom/pan state and logic
+  const P = { scale: 1, min: 1, max: 4, x: 0, y: 0, baseW: 0, baseH: 0, vw: 0, vh: 0,
+              dragging: false, startX: 0, startY: 0, startTX: 0, startTY: 0,
+              pinchDist: 0, pinchStartScale: 1, pinchCenter: {x:0,y:0} };
+
+  function initPlanZoom(){
+    // viewport is the visible area of planInner
+    const rect = planInner.getBoundingClientRect();
+    P.vw = rect.width; P.vh = rect.height;
+    // base is current fitted image size
+    const iw = planImg.clientWidth; const ih = planImg.clientHeight;
+    // Set explicit base size to avoid layout jumps when transforming
+    P.baseW = Math.max(1, Math.round(iw));
+    P.baseH = Math.max(1, Math.round(ih));
+    planInner.style.width = P.baseW + 'px';
+    planInner.style.height = P.baseH + 'px';
+    P.scale = 1; centerPlan(); applyPlanTransform();
+  }
+  function centerPlan(){
+    // center inside its own viewport (same as base size at scale 1)
+    P.x = 0; P.y = 0; // since base equals viewport, no offset is needed
+  }
+  function applyPlanTransform(){
+    const sw = P.baseW * P.scale;
+    const sh = P.baseH * P.scale;
+    // Allowed translate range so content stays within viewport
+    let minX, maxX, minY, maxY;
+    if (sw <= P.vw) { minX = maxX = (P.vw - sw) / 2; } else { minX = P.vw - sw; maxX = 0; }
+    if (sh <= P.vh) { minY = maxY = (P.vh - sh) / 2; } else { minY = P.vh - sh; maxY = 0; }
+    P.x = Math.max(minX, Math.min(P.x, maxX));
+    P.y = Math.max(minY, Math.min(P.y, maxY));
+    planInner.style.transform = `translate(${P.x}px, ${P.y}px) scale(${P.scale})`;
+    const canPanX = sw > P.vw, canPanY = sh > P.vh;
+    planInner.style.cursor = (P.scale > 1 && (canPanX || canPanY)) ? (P.dragging ? 'grabbing' : 'grab') : 'default';
+  }
+  function setPlanScaleAt(cx, cy, newScale){
+    const s = Math.max(P.min, Math.min(P.max, newScale));
+    const prev = P.scale;
+    if(s === prev){ applyPlanTransform(); return; }
+    const imgX = (cx - P.x) / prev;
+    const imgY = (cy - P.y) / prev;
+    P.scale = s;
+    P.x = cx - imgX * P.scale;
+    P.y = cy - imgY * P.scale;
+    applyPlanTransform();
+  }
+
   async function onPlanChange(){
     const plan = planSelect.value;
     if(!plan){ showMessage('Оберіть план'); return; }
@@ -218,6 +276,8 @@
 
       await loadPoints();
       renderHotspots(plan);
+      // initialize plan zoom after rendering
+      initPlanZoom();
     }catch(e){
       console.error(e);
       showMessage('Не вдалося завантажити дані плану');
@@ -400,6 +460,107 @@
 
   // Recenter on window resize while modal open
   window.addEventListener('resize', ()=>{ if(modal.classList.contains('open')) initZoom(); });
+
+  // Plan controls
+  planZoomInBtn.addEventListener('click', ()=>{
+    const rect = planInner.getBoundingClientRect();
+    setPlanScaleAt(rect.width/2, rect.height/2, P.scale + 0.25);
+  });
+  planZoomOutBtn.addEventListener('click', ()=>{
+    const rect = planInner.getBoundingClientRect();
+    const target = P.scale - 0.25;
+    if(target <= 1){ P.scale = 1; centerPlan(); applyPlanTransform(); }
+    else setPlanScaleAt(rect.width/2, rect.height/2, target);
+  });
+
+  // Mouse pan
+  planInner.addEventListener('mousedown', (e)=>{
+    // ignore if clicking on a hotspot when not zoomed? Allow click; only start drag if zoomed
+    if(e.button !== 0) return;
+    if(P.scale <= 1) return;
+    P.dragging = true;
+    P.startX = e.clientX; P.startY = e.clientY;
+    P.startTX = P.x; P.startTY = P.y;
+    applyPlanTransform();
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', (e)=>{
+    if(!P.dragging) return;
+    const dx = e.clientX - P.startX;
+    const dy = e.clientY - P.startY;
+    P.x = P.startTX + dx;
+    P.y = P.startTY + dy;
+    applyPlanTransform();
+  });
+  window.addEventListener('mouseup', ()=>{ if(P.dragging){ P.dragging=false; applyPlanTransform(); } });
+
+  // Wheel zoom
+  planInner.addEventListener('wheel', (e)=>{
+    e.preventDefault();
+    const rect = planInner.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
+    const delta = e.deltaY > 0 ? -0.2 : 0.2;
+    const target = P.scale + delta;
+    if(target <= 1){ P.scale = 1; centerPlan(); applyPlanTransform(); }
+    else setPlanScaleAt(cx, cy, target);
+  }, { passive: false });
+
+  // Touch gestures for plan: pinch and pan
+  planInner.addEventListener('touchstart', (e)=>{
+    if(e.touches.length === 2){
+      e.preventDefault();
+      const [t1, t2] = [e.touches[0], e.touches[1]];
+      P.pinchDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      const rect = planInner.getBoundingClientRect();
+      P.pinchCenter = { x: ((t1.clientX + t2.clientX)/2) - rect.left,
+                        y: ((t1.clientY + t2.clientY)/2) - rect.top };
+      P.pinchStartScale = P.scale;
+    } else if(e.touches.length === 1){
+      if(P.scale <= 1) return;
+      const t = e.touches[0];
+      P.dragging = true;
+      P.startX = t.clientX; P.startY = t.clientY;
+      P.startTX = P.x; P.startTY = P.y;
+    }
+  }, { passive: false });
+  planInner.addEventListener('touchmove', (e)=>{
+    if(e.touches.length === 2){
+      e.preventDefault();
+      const [t1, t2] = [e.touches[0], e.touches[1]];
+      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      const scale = P.pinchStartScale * (dist / (P.pinchDist || 1));
+      setPlanScaleAt(P.pinchCenter.x, P.pinchCenter.y, scale);
+    } else if(e.touches.length === 1 && P.dragging){
+      e.preventDefault();
+      const t = e.touches[0];
+      const dx = t.clientX - P.startX;
+      const dy = t.clientY - P.startY;
+      P.x = P.startTX + dx;
+      P.y = P.startTY + dy;
+      applyPlanTransform();
+    }
+  }, { passive: false });
+  planInner.addEventListener('touchend', ()=>{ P.dragging=false; });
+  planInner.addEventListener('touchcancel', ()=>{ P.dragging=false; });
+
+  // Recalculate on resize
+  window.addEventListener('resize', ()=>{
+    // re-fit only when not zoomed; otherwise keep scale and clamp
+    const wasScaled = P.scale > 1;
+    const prevScale = P.scale;
+    const prevCx = P.vw/2, prevCy = P.vh/2;
+    const rect = planInner.getBoundingClientRect();
+    P.vw = rect.width; P.vh = rect.height;
+    // reset base from current image size in layout
+    planInner.style.width = '';
+    planInner.style.height = '';
+    initPlanZoom();
+    if(wasScaled){
+      // restore scale around center
+      setPlanScaleAt(prevCx, prevCy, prevScale);
+    }
+  });
 
   planSelect.addEventListener('change', onPlanChange);
   loadPlans();

@@ -114,15 +114,21 @@
     statusEl.classList.add('hidden');
   }
 
-  async function api(url){
-    const res = await fetch(url, {cache:'no-cache'});
+  async function loadDataJson(){
+    const res = await fetch('data.json', {cache:'no-cache'});
     if(!res.ok) throw new Error('HTTP '+res.status);
     return await res.json();
   }
 
+  let DATA = { points: [] };
+
   async function loadPlans(){
     try{
-      const plans = await api('ajax.php?action=PLANS');
+      DATA = await loadDataJson();
+      const points = Array.isArray(DATA) ? DATA : (Array.isArray(DATA.points) ? DATA.points : []);
+      allPoints = points;
+      const plansSet = new Set(points.map(p=>p.plan).filter(Boolean));
+      const plans = Array.from(plansSet);
       planSelect.innerHTML = '';
       if(!plans || plans.length === 0){
         planSelect.classList.add('hidden');
@@ -140,14 +146,15 @@
       await onPlanChange();
     }catch(e){
       console.error(e);
-      showMessage('Помилка завантаження планів');
+      showMessage('Помилка завантаження даних');
     }
   }
 
   async function loadPoints(){
+    // Points are already loaded from data.json in loadPlans
     try{
-      const pts = await api('ajax.php');
-      allPoints = Array.isArray(pts) ? pts : [];
+      const points = Array.isArray(DATA) ? DATA : (Array.isArray(DATA.points) ? DATA.points : []);
+      allPoints = points;
     }catch(e){ allPoints = []; }
   }
 
@@ -178,13 +185,32 @@
     hideMessage();
 
     try{
-      const files = await api('ajax.php?action=PLAN_FILES&plan=' + encodeURIComponent(plan));
-      if(!files || files.length === 0){
+      // Try standard background names in uploads/{plan}/
+      const candidates = [
+        `uploads/${plan}/plan.jpg`,
+        `uploads/${plan}/plan.png`,
+        `uploads/${plan}/plan.webp`
+      ];
+      let chosen = '';
+      for(const src of candidates){
+        const ok = await new Promise(resolve=>{
+          const img = new Image();
+          img.onload = ()=>resolve(true);
+          img.onerror = ()=>resolve(false);
+          img.src = src + `?t=${Date.now()}`; // bust cache
+        });
+        if(ok){ chosen = src; break; }
+      }
+      if(!chosen){
+        // fallback to first photo from points of this plan
+        const firstPoint = allPoints.find(p=>p.plan===plan && p.photo);
+        if(firstPoint) chosen = firstPoint.photo;
+      }
+      if(!chosen){
         showMessage('Для плану не знайдено фонового зображення');
         return;
       }
-      const bg = files.find(f => /plan\.(jpg|jpeg|png|webp)$/i.test(f)) || files[0];
-      planImg.src = bg;
+      planImg.src = chosen;
       await new Promise(res => { planImg.onload = res; planImg.onerror = res; });
       natural.w = planImg.naturalWidth || planImg.clientWidth;
       natural.h = planImg.naturalHeight || planImg.clientHeight;
@@ -200,8 +226,14 @@
 
   async function openGallery(point){
     try{
-      const files = await api('ajax.php?action=LIST&plan=' + encodeURIComponent(point.plan) + '&room=' + encodeURIComponent(point.room));
-      gallery = { files, plan: point.plan, room: point.room, idx: Math.max(0, files.indexOf(point.photo)) };
+      // Build gallery from points belonging to same plan+room
+      const filesSet = new Set(
+        allPoints.filter(p=>p.plan===point.plan && p.room===point.room && p.photo)
+                 .map(p=>p.photo)
+      );
+      const files = Array.from(filesSet);
+      const startIdx = Math.max(0, files.indexOf(point.photo));
+      gallery = { files: files.length?files:[point.photo].filter(Boolean), plan: point.plan, room: point.room, idx: startIdx };
       updateModal();
       modal.classList.add('open');
     }catch(e){ console.error(e); }

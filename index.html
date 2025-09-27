@@ -18,7 +18,7 @@
     .plan-wrap { position: relative; width: 100%; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden; }
     .plan-inner { position: relative; width: 100%; touch-action: none; overflow: hidden; transform-origin: 0 0; }
     .plan-inner img { width: 100%; height: auto; display: block; }
-    .hotspot { position: absolute; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.25); transform: translate(-50%, -50%); cursor: pointer; }
+    .hotspot { position: absolute; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.25); transform: translate(-50%, -50%); transform-origin: center center; cursor: pointer; }
     .legend { padding: 8px 12px; font-size: 13px; color: #475569; }
 
     /* Plan zoom overlay controls */
@@ -57,10 +57,10 @@
     <div class="plan-inner" id="planInner">
       <img id="planImg" alt="План" />
       <div id="hotspots"></div>
-      <div class="plan-zoom-controls">
-        <button id="planZoomOut" class="plan-zoom-btn" title="Зменшити">−</button>
-        <button id="planZoomIn" class="plan-zoom-btn" title="Збільшити">+</button>
-      </div>
+    </div>
+    <div class="plan-zoom-controls">
+      <button id="planZoomOut" class="plan-zoom-btn" title="Зменшити">−</button>
+      <button id="planZoomIn" class="plan-zoom-btn" title="Збільшити">+</button>
     </div>
     <div class="legend" id="legend"></div>
   </div>
@@ -222,6 +222,13 @@
     P.x = Math.max(minX, Math.min(P.x, maxX));
     P.y = Math.max(minY, Math.min(P.y, maxY));
     planInner.style.transform = `translate(${P.x}px, ${P.y}px) scale(${P.scale})`;
+
+    // Keep hotspots the same on-screen size by inversely scaling each dot
+    const inv = 1 / (P.scale || 1);
+    for (const el of hotspotsEl.children) {
+      el.style.transform = `translate(-50%, -50%) scale(${inv})`;
+    }
+
     const canPanX = sw > P.vw, canPanY = sh > P.vh;
     planInner.style.cursor = (P.scale > 1 && (canPanX || canPanY)) ? (P.dragging ? 'grabbing' : 'grab') : 'default';
   }

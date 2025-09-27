@@ -24,9 +24,9 @@
     /* Modal */
     .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; padding: 10px; z-index: 20; }
     .modal.open { display: flex; }
-    .modal-content { background: #0b0f15; color: white; width: calc(100vw - 20px); max-width: none; height: calc(100vh - 20px); border-radius: 10px; overflow: hidden; display: grid; grid-template-rows: auto 1fr auto; }
+    .modal-content { background: #0b0f15; color: white; width: calc(100vw - 10px); max-width: none; height: calc(100vh - 50px); border-radius: 10px; overflow: hidden; display: grid; grid-template-rows: auto 1fr auto; }
     .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: #111827; }
-    .modal-body { background: #0b0f15; position: relative; overflow: hidden; height: auto; min-height: 0; }
+    .modal-body { background: #0b0f15; position: relative; overflow: hidden; calc(80vh - 80px); min-height: 0; }
     .modal-body img { position: absolute; top: 0; left: 0; width: auto; height: auto; max-width: none; max-height: none; display: block; transform-origin: 0 0; user-select: none; -webkit-user-drag: none; }
     .modal-footer { display: flex; justify-content: space-between; padding: 8px 12px; background: #111827; }
     .modal button { background: #1f2937; color: #fff; border: 1px solid #374151; }
